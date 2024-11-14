@@ -1,0 +1,19 @@
+{  
+  // "is-main": true,
+  "import": [
+    {
+      "path": "moonbitlang/minimbt",
+      "alias": "types"
+    },
+    "lijunchen/unstable_io/fs",
+    "moonbitlang/minimbt/lex",
+    "moonbitlang/minimbt/parser",
+    "moonbitlang/minimbt/typing",
+    "moonbitlang/minimbt/util"
+  ],
+  "test-import": [
+    "moonbitlang/minimbt/parser",
+    "moonbitlang/minimbt/lex",
+    "moonbitlang/minimbt/typing"
+  ]
+}

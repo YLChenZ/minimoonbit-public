@@ -5,21 +5,24 @@ pub enum Syntax {
   Double(Double) // double
   Var(String) // _
   Tuple(Array[Syntax]) // (_, _, _)
-  Not(Syntax) // not(_)
-  Array(Syntax, Syntax) // Array::make(_, _)
-  Neg(Syntax, mut ~kind : Kind?) // -_
+  Not(Syntax) // not(_)  
+  Array(Syntax, Syntax) // Array::make(n, e)  [e,e,..,e] n个
+  Neg(Syntax, mut ~kind : Kind?) // -_  -2
   App(Syntax, Array[Syntax]) // _(_, _, _) or _()
-  Get(Syntax, Syntax) // _[_]
+  Get(Syntax, Syntax) // _[_]   arr[i]
   If(Syntax, Syntax, Syntax) // if _ { _ } else { _ }
-  Prim(Syntax, Syntax, Op, mut ~kind : Kind?) // _+ - * / _
-  Eq(Syntax, Syntax) // _==_
+  Prim(Syntax, Syntax, Op, mut ~kind : Kind?) // _ + - * / _   1+2    1*3
+  Eq(Syntax, Syntax) // _==_  
   LE(Syntax, Syntax) // _<=_
-  Let((String, Type), Syntax, Syntax) // let _: _ = _; _
+  Let((String, Type), Syntax, Syntax) // let _: _ = _; _   let x : Int = 3;syntax
   LetRec(Fundef, Syntax) // fn f() {} ; _
-  LetTuple(Array[(String, Type)], Syntax, Syntax) // let (_ , _) : (_, _)= _; _
-  Put(Syntax, Syntax, Syntax) // _[_] = _
+  LetTuple(Array[(String, Type)], Syntax, Syntax) // let (_ , _) : (_, _)= _; _   let (x,y,z) : (Int,Int,Int) = (1,2,3);Syntax
+  Put(Syntax, Syntax, Syntax) // _[_] = _    arr[i] = 3  // let "" : Unit = arr[i] = 3; stmt
 } derive(Show)
 
+//make_adder(x){fn adder(y) {x+y};{adder;x;y} }
+//11.11
+//Array::make(n,e) 
 pub enum Kind {
   Int
   Double
@@ -32,7 +35,7 @@ pub enum Op {
   Div
 } derive(Show, Eq)
 
-pub struct Fundef {
+pub struct Fundef {  //fn add(x,y) -> Int { x+y }  (Int,Int) -> Int
   name : (String, Type)
   args : Array[(String, Type)]
   body : Syntax
@@ -62,6 +65,31 @@ pub fn Type::is_ptr_like(self : Type) -> Bool {
   }
 }
 
+pub fn type2kind(self:Type) -> Kind{
+  match self {
+    Int => Int
+    Double => Double
+    _ => panic()
+  }
+}
+pub fn Type::rep(self : Type) -> Type{  //Var({val : Some(Int)}) => Int
+  match self {
+    Var(t) => {
+      match t.val {
+        Some(ty) => {
+          let actualType = ty.rep()
+          t.val = Some(actualType)
+          actualType
+        }
+        None => self
+      }
+    }
+    Fun(argt,rett) => Fun(argt.map(fn{t=>t.rep()}),rett.rep())
+    Tuple(arr_ty) => Tuple(arr_ty.map(fn{t=>t.rep()}))
+    Array(ty) => Array(ty.rep())
+    ty => ty
+  }
+}
 pub fn Type::is_float_like(self : Type) -> Bool {
   match self {
     Double => true
@@ -89,7 +117,7 @@ pub fn Type::size_of(self : Type, size_of_ptr : Int) -> Int {
   }
 }
 
-pub fn Type::op_equal(self : Type, other : Type) -> Bool {
+pub fn Type::op_equal(self : Type, other : Type) -> Bool {  // Int =? Int
   match (self, other) {
     (Unit, Unit) => true
     (Bool, Bool) => true
