@@ -5,6 +5,9 @@ enum Stages {
   Knf
   KnfOpt
   Closure
+  Js
+  Wasm
+  Vm
   Asm
   Finished
 } derive(Show, Eq, Compare)
@@ -16,6 +19,9 @@ fn Stages::from_string(s : String) -> Stages? {
     "knf" => Some(Stages::Knf)
     "knf-opt" => Some(Stages::KnfOpt)
     "closure" => Some(Stages::Closure)
+    "js" => Some(Stages::Js)
+    "wasm" => Some(Stages::Wasm)
+    "vm" => Some(Stages::Vm)
     "riscv" => Some(Stages::Asm)
     "finished" => Some(Stages::Finished)
     _ => None
@@ -28,7 +34,10 @@ fn Stages::next(self : Stages) -> Stages {
     Stages::Typecheck => Stages::Knf
     Stages::Knf => Stages::KnfOpt
     Stages::KnfOpt => Stages::Closure
-    Stages::Closure => @util.die("TODO")
+    Stages::Closure => Stages::Js
+    Stages::Js => Stages::Wasm
+    Stages::Wasm => Stages::Vm
+    Stages::Vm => Stages::Asm
     Stages::Asm => Stages::Finished
     Stages::Finished => Stages::Finished
   }
@@ -44,6 +53,9 @@ struct CompileStatus {
   mut knf : @knf.Knf?
   mut opt_knf : @knf.Knf?
   mut closure_ir : @closure.Program?
+  mut js : String?
+  mut wasm : String?
+  mut vm : @riscv.Prog?
   mut asm : Array[@riscv.AssemblyFunction]?
 }
 
@@ -62,6 +74,9 @@ fn CompileStatus::initialize(
     knf: None,
     opt_knf: None,
     closure_ir: None,
+    js : None,
+    wasm : None,
+    vm : None,
     asm: None,
   }
   match start_stage {
@@ -89,32 +104,63 @@ fn CompileStatus::step(self : CompileStatus) -> Bool {
   match self.curr_stage {
     Parse => {
       let source_code = self.source_code.unwrap()
-      let parsed = @util.die("TODO: parse")
+      //println(source_code)
+      let arr = []
+      let lex : @lex.Lexer = {input:source_code,readPoint:0,output:arr}
+      let prog = @types.Syntax::Unit
+      let parser : @parser.Parser = {input:lex.getAllTokens(),curPos:0,output:prog}
+      let parsed = parser.getAst()
       self.ast = Some(parsed)
+      // println(self.ast.unwrap())
     }
     Typecheck => {
-      let typechecked = @util.die("TODO: typecheck")
-      self.typechecked = Some(typechecked)
+      let ast = self.ast.unwrap()
+      let typing = @typing.typing(ast)
+      self.typechecked = Some(typing)
+      // println(self.typechecked.unwrap())
     }
     Knf => {
-      let knf = self.knf_env.to_knf(self.typechecked.unwrap())
+      let typing = self.typechecked.unwrap()
+      let preAst = @knf.syntax_preprocess(self.knf_env,typing)
+      let knf = self.knf_env.to_knf(preAst)
       self.knf = Some(knf)
+      // println(knf)
     }
     KnfOpt => {
       let knf = self.knf.unwrap()
-      // TODO: optimize
-      self.opt_knf = Some(knf)
+      self.opt_knf = Some(self.knf_env.opt_pass(knf))
+      // self.opt_knf = Some(knf)
+      // println(self.opt_knf.unwrap())
     }
     Closure => {
       let closure_ir = @closure.knf_program_to_closure(
         self.opt_knf.unwrap(),
         Map::from_iter(externals().iter()),
       )
+      // println(closure_ir)
       self.closure_ir = Some(closure_ir)
     }
+    Js => {
+      let js = @js.to_js(self.typechecked.unwrap(),false)
+      self.js = Some(js)
+      // println(self.js.unwrap())
+    }
+    Wasm => { ////wasmbackend
+      let js = @js.to_js(self.typechecked.unwrap(),false)
+      self.js = Some(js)
+      // println(js)
+    }
+    Vm => {
+      let vm = @riscv.prog_to_prog(self.closure_ir.unwrap())
+      let nvm = @riscv.prog_alloc_reg(vm)
+      // println(vm)
+      // println(nvm)
+      self.vm = Some(nvm)
+    }
     Asm => {
-      let real_asm = @riscv.emit(@util.die("TODO"))
+      let real_asm = @riscv.emit(self.vm.unwrap())
       self.asm = Some(real_asm)
+      // println(@riscv.print_functions(real_asm))
     }
     Finished => ()
   }
@@ -140,7 +186,7 @@ fn CompileStatus::output(self : CompileStatus, json : Bool) -> String {
       Knf => self.typechecked.unwrap().to_string()
       KnfOpt => self.knf.unwrap().to_string()
       Closure => self.opt_knf.unwrap().to_string()
-      Asm => @util.die("TODO")
+      Asm => self.vm.unwrap().to_string()
       Finished => @riscv.print_functions(self.asm.unwrap())
     }
   }
@@ -158,6 +204,9 @@ fn main {
   let end_stage = Ref::new(Stages::Finished)
   let knf_interpreter = Ref::new(false)
   let closure_interpreter = Ref::new(false)
+  let js_backend = Ref::new(false)
+  let wasm_backend : Ref[Bool] = Ref::new(false)
+  let vm : Ref[Bool] = Ref::new(false)
   let out_file = Ref::new("-")
   let print = Ref::new([])
 
@@ -201,6 +250,24 @@ fn main {
         "",
         @ArgParser.Set(closure_interpreter),
         "Run with closure interpreter",
+      ),
+      (
+        "--js",
+        "",
+        @ArgParser.Set(js_backend),
+        "Run with Js backend",
+      ),
+      (
+        "--wasm",
+        "",
+        @ArgParser.Set(wasm_backend),
+        "Run with Wasm backend",
+      ),
+      (
+        "--vm",
+        "",
+        @ArgParser.Set(vm),
+        "Run with Vm",
       ),
       (
         "--out-file",
@@ -263,6 +330,15 @@ fn main {
   if closure_interpreter.val {
     end_stage.val = Stages::Closure
   }
+  if js_backend.val {
+    end_stage.val = Stages::Js
+  }
+  if wasm_backend.val {
+    end_stage.val = Stages::Wasm
+  }
+  if vm.val {
+    end_stage.val = Stages::Vm
+  }
   let stages_to_print = print.val.map(
     fn(s) {
       match Stages::from_string(s) {
@@ -324,7 +400,14 @@ fn main {
         @util.die("Closure interpreter error")
       }
     }
-  } else {
+  } else if js_backend.val {
+    @fs.write_to_string(out_file.val, status.js.unwrap())
+  } else if wasm_backend.val {
+    @fs.write_to_string(out_file.val, status.wasm.unwrap())
+  } else if vm.val{
+    // println(status.vm.unwrap())
+  }
+  else {
     let out_string = status.output(json.val)
     if out_file.val == "-" {
       println(out_string)
