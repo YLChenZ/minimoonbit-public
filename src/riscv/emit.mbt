@@ -1,7 +1,21 @@
 pub fn emit(
-  input : Unit // TODO
+  input : Prog
 ) -> Array[AssemblyFunction] {
-  abort("todo")
+  let fun = input.funlist.map(emit_fundef)
+  stackset.val = @immut/sorted_set.new()
+  stackmap.val = []
+  let main_body = emit_instr_rvasm(NonTail("zero"),input.body)
+  let pre_size = stacksize()
+  let pre = [Addi(Sp,Sp,-pre_size),
+             Sd(Ra,{base:Sp,offset:(pre_size-8)}),
+             Sd(Fp,{base:Sp,offset:(pre_size-16)}),
+             Addi(Fp,Sp,pre_size)]
+  let end :Array[RvAsm] = 
+    [ Ld(Ra,{base:Sp,offset:pre_size-8}),
+      Ld(Fp,{base:Sp,offset:pre_size-16}),
+      Addi(Sp,Sp,pre_size),Ret]
+  let main = {name:"minimbt_main",export:true,body:pre + main_body +end}
+  fun + [main]
 }
 
 pub struct AssemblyFunction {
